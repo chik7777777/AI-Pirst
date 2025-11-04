@@ -6,4 +6,4 @@ if st.button('인사말 생성'):
   st.info(name+'님 하요!!!>v<')
   st.warning(m+'을 좋아하시는군요. 저도 좋아해요!>_<')
   st.error('반갑습니당~!^~^')
-  st.chicken()
+  st.chickens()
