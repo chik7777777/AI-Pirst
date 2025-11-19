@@ -5,42 +5,44 @@ import plotly.graph_objects as go
 
 # --- 설정 및 데이터 로드 ---
 
-# 1. 페이지 설정 (Streamlit Cloud 환경에서 실행)
+# 1. 페이지 설정
 st.set_page_config(
     page_title="OTT 서비스 선호도 분석",
     layout="wide"
 )
 
 # 2. 데이터 로드 및 캐싱
-# '../video.csv'는 현재 파일(pages/ott_analysis.py)의 상위 폴더(..)에 파일이 있음을 의미합니다.
+# 경로를 'video.csv'로 수정하여 Streamlit Root 폴더에서 파일을 찾도록 합니다.
 @st.cache_data
 def load_data(file_path):
+    """CSV 파일을 불러오고 인코딩 오류를 처리합니다."""
     try:
-        # 인코딩 문제 방지를 위해 'euc-kr' 또는 'utf-8' 시도 (일반적으로 'utf-8'을 권장)
+        # 파일 경로 수정: '../video.csv' -> 'video.csv'
         df = pd.read_csv(file_path, encoding='utf-8')
         return df
     except UnicodeDecodeError:
+        # utf-8이 아닐 경우 euc-kr로 재시도
         st.error("CSV 파일 인코딩 오류! 'euc-kr'로 재시도합니다.")
         return pd.read_csv(file_path, encoding='euc-kr')
 
-# OTT 서비스 칼럼 리스트 정의 (분석에서 제외할 칼럼 명시)
+# 분석에서 제외할 칼럼 리스트
 EXCLUDE_COLUMNS = ['연도', '구분1', '구분2', '사례수', 'OTT 비이용', '기타']
 
 try:
-    df_raw = load_data('../video.csv')
+    # 파일 로드 시 'video.csv'를 인수로 전달
+    df_raw = load_data('video.csv') 
 except FileNotFoundError:
-    st.error("`video.csv` 파일을 상위 폴더(root)에서 찾을 수 없습니다. 경로를 확인해주세요.")
-    st.stop()
+    st.error("🚨 `video.csv` 파일을 프로젝트 최상위 폴더(Root)에서 찾을 수 없습니다. 경로를 확인해주세요.")
+    st.stop() # 파일을 찾지 못하면 앱 실행 중지
+
 
 # --- 데이터 전처리 함수 ---
 def preprocess_data(df):
-    """
-    분석에 필요한 데이터프레임으로 변환합니다.
-    """
-    # 1. 분석 대상 OTT 칼럼 추출
+    """분석에 필요한 데이터프레임으로 Long 포맷으로 변환합니다."""
+    # 분석 대상 OTT 칼럼 추출
     ott_columns = [col for col in df.columns if col not in EXCLUDE_COLUMNS]
 
-    # 2. Wide 포맷을 Long 포맷으로 변환 (Plotly 사용에 적합)
+    # Wide 포맷을 Long 포맷으로 변환
     df_long = pd.melt(
         df,
         id_vars=['연도', '구분1', '구분2'],
@@ -86,16 +88,16 @@ st.markdown("---")
 # --- 데이터 필터링 및 그래프 생성 ---
 
 def create_plotly_bar_chart(df, year, sub_division):
-    # 1. 필터링
+    # 1. 필터링 및 순위 정렬
     filtered_data = df[
         (df['연도'] == year) &
         (df['구분2'] == sub_division)
     ].sort_values(by='이용률(%)', ascending=False).reset_index(drop=True)
 
     # 2. 순위 및 컬러 맵핑
-    # 1등은 빨간색, 나머지는 파란색 그라데이션
+    # 1등은 빨간색, 나머지는 파란색 그라데이션으로 흐려지게 설정
     
-    # 순위를 기준으로 색상 정의 (1등: 빨강, 2등부터: 진한 파랑 -> 옅은 파랑)
+    # 2등부터 사용할 파란색 톤 리스트 (진한 파랑에서 옅은 파랑 순)
     blue_shades = [
         '#0047AB', # 2등 (진한 파랑)
         '#1f77b4', 
@@ -107,11 +109,11 @@ def create_plotly_bar_chart(df, year, sub_division):
     ]
     
     colors = []
-    for i, row in filtered_data.iterrows():
+    for i in range(len(filtered_data)):
         if i == 0:
-            colors.append('red') # 1등
+            colors.append('red') # 1등은 빨간색
         else:
-            # blue_shades 리스트를 순환하며 색상 할당
+            # 2등부터 blue_shades를 순환하며 색상 할당
             colors.append(blue_shades[(i - 1) % len(blue_shades)])
 
     # 3. Plotly 그래프 생성
@@ -130,16 +132,17 @@ def create_plotly_bar_chart(df, year, sub_division):
     fig.update_layout(
         title={
             'text': f"**{sub_division}의 OTT 서비스 선호 순위**",
-            'y':0.9,
+            'y':0.95,
             'x':0.5,
             'xanchor': 'center',
-            'yanchor': 'top'
+            'yanchor': 'top',
+            'font': {'size': 20}
         },
         xaxis_title="이용률 (%)",
         yaxis_title="OTT 서비스",
         yaxis={'categoryorder':'total ascending'}, # 이용률이 높은 순서로 정렬된 채로 보여주기
         height=600,
-        margin=dict(l=10, r=10, t=50, b=10) # 여백 조정
+        margin=dict(l=10, r=10, t=50, b=10)
     )
     
     # 5. 인터랙티브 기능 추가 (호버 텍스트)
@@ -152,9 +155,9 @@ if not df_long.empty:
     chart = create_plotly_bar_chart(df_long, selected_year, selected_sub_division)
     st.plotly_chart(chart, use_container_width=True)
 else:
-    st.warning("선택된 조건에 해당하는 데이터가 없습니다.")
+    st.warning("선택된 조건에 해당하는 데이터가 없습니다. 필터 조건을 확인해주세요.")
 
-# 하단에 원본 데이터 테이블 표시 (선택 사항)
+# 하단에 원본 데이터 테이블 표시
 with st.expander("데이터 테이블 보기"):
     st.dataframe(df_raw[
         (df_raw['연도'] == selected_year) & 
