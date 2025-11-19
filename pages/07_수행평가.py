@@ -13,11 +13,11 @@ st.set_page_config(
 # 데이터 로드 및 캐싱 함수
 @st.cache_data
 def load_data(file_path):
+    """CSV 파일을 불러오고 인코딩 오류를 처리합니다."""
     try:
         df = pd.read_csv(file_path, encoding='utf-8')
         return df
     except UnicodeDecodeError:
-        # utf-8 실패 시 euc-kr로 재시도
         st.warning("CSV 파일 인코딩 오류! 'euc-kr'로 재시도합니다.")
         return pd.read_csv(file_path, encoding='euc-kr')
 
@@ -48,7 +48,7 @@ def preprocess_data(df):
 df_long = preprocess_data(df_raw.copy())
 
 
-# --- RECOMMENDATION DATA ---
+# --- RECOMMENDATION DATA & FUNCTION ---
 RECOMMENDATIONS = {
     '유튜브': {
         '추천': '인기 쇼츠, 브이로그 및 라이브 스트리밍',
@@ -169,19 +169,25 @@ if not df_long.empty:
         rank = i + 1
         utilization_rate = ranked_data.iloc[i]["이용률(%)"]
         
-        # HTML 스타일 문자열을 함수 호출 시에만 생성
+        # HTML 스타일 문자열을 단순화하여 직접 마크다운에 삽입하지 않고, 
+        # f-string을 이용하여 깔끔하게 구성합니다.
+        
+        # 1. 스타일 클래스 정의 (실제 Streamlit에서는 CSS 파일이 없으므로 인라인 스타일 유지)
         if rank == 1:
             color_style = "background-color: #ffeaea; border-left: 5px solid red; padding: 10px; border-radius: 5px;"
         else:
             color_style = "background-color: #eaf3ff; border-left: 5px solid #0047AB; padding: 10px; border-radius: 5px;"
             
-        card_content = f"""
-        <div style="{color_style}">
-        <h4><b>{rank}위: {ott_name}</b> ({utilization_rate:.1f}%)</h4>
-        <p><b>📌 주요 인기 콘텐츠</b>: {recommendation["추천"]}</p>
-        <p><b>💬 설명</b>: {recommendation["설명"]}</p>
-        </div>
-        """
+        
+        # 2. 카드 콘텐츠 생성 (백틱(``)이나 ''' 트리플 쿼트를 사용하지 않고, 
+        # 따옴표 사용을 최소화하여 파이썬 컴파일러의 부담을 줄입니다)
+        card_content = (
+            f'<div style="{color_style}">'
+            f'<h4><b>{rank}위: {ott_name}</b> ({utilization_rate:.1f}%)</h4>'
+            f'<p><b>📌 주요 인기 콘텐츠</b>: {recommendation["추천"]}</p>'
+            f'<p><b>💬 설명</b>: {recommendation["설명"]}</p>'
+            '</div>'
+        )
         
         with cols[i]:
             st.markdown(card_content, unsafe_allow_html=True)
