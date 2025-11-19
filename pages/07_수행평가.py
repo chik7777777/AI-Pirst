@@ -1,46 +1,41 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 
-# --- 설정 및 데이터 로드 ---
+# --- CONFIGURATION & DATA LOAD ---
 
-# 1. 페이지 설정
 st.set_page_config(
     page_title="OTT 서비스 선호도 분석 및 콘텐츠 추천",
     layout="wide"
 )
 
-# 2. 데이터 로드 및 캐싱 (경로 수정 완료)
+# 데이터 로드 및 캐싱 함수
 @st.cache_data
 def load_data(file_path):
-    """CSV 파일을 불러오고 인코딩 오류를 처리합니다. Streamlit Root 폴더 기준 'video.csv'"""
     try:
         df = pd.read_csv(file_path, encoding='utf-8')
         return df
     except UnicodeDecodeError:
-        # utf-8이 아닐 경우 euc-kr로 재시도
-        st.error("CSV 파일 인코딩 오류! 'euc-kr'로 재시도합니다.")
+        # utf-8 실패 시 euc-kr로 재시도
+        st.warning("CSV 파일 인코딩 오류! 'euc-kr'로 재시도합니다.")
         return pd.read_csv(file_path, encoding='euc-kr')
 
-# 분석에서 제외할 칼럼 리스트
+# 분석 제외 칼럼
 EXCLUDE_COLUMNS = ['연도', '구분1', '구분2', '사례수', 'OTT 비이용', '기타']
 
 try:
-    # 파일 로드 시 'video.csv'를 인수로 전달 (최상위 폴더 기준)
     df_raw = load_data('video.csv') 
 except FileNotFoundError:
     st.error("🚨 `video.csv` 파일을 프로젝트 최상위 폴더(Root)에서 찾을 수 없습니다. 경로를 확인해주세요.")
     st.stop() 
 
 
-# --- 데이터 전처리 함수 ---
-def preprocess_data(df):
-    """분석에 필요한 데이터프레임으로 Long 포맷으로 변환합니다."""
-    # 분석 대상 OTT 칼럼 추출
-    ott_columns = [col for col in df.columns if col not in EXCLUDE_COLUMNS]
+# --- PREPROCESSING ---
 
-    # Wide 포맷을 Long 포맷으로 변환
+def preprocess_data(df):
+    """Wide 포맷을 Long 포맷으로 변환"""
+    ott_columns = [col for col in df.columns if col not in EXCLUDE_COLUMNS]
     df_long = pd.melt(
         df,
         id_vars=['연도', '구분1', '구분2'],
@@ -53,64 +48,50 @@ def preprocess_data(df):
 df_long = preprocess_data(df_raw.copy())
 
 
-# --- 콘텐츠 추천 함수 (정적 데이터 기반) ---
+# --- RECOMMENDATION DATA ---
+RECOMMENDATIONS = {
+    '유튜브': {
+        '추천': '인기 쇼츠, 브이로그 및 라이브 스트리밍',
+        '설명': '1인 크리에이터의 **짧고 재미있는 숏폼 콘텐츠(Shorts)**와 실시간 소통이 가능한 **라이브 방송**이 모든 연령대에서 압도적인 인기를 보입니다.'
+    },
+    '넷플릭스': {
+        '추천': '오리지널 K-드라마, 글로벌 시리즈 및 영화',
+        '설명': '세계적인 성공을 거둔 **넷플릭스 오리지널 드라마** 시리즈와 전 세계에서 인기를 끄는 **블록버스터 영화**가 주력 콘텐츠입니다.'
+    },
+    '티빙': {
+        '추천': 'CJ ENM 채널의 최신 예능/드라마 및 독점 오리지널',
+        '설명': 'tvN, Mnet 등 **CJ ENM 계열 채널** VOD 시청이 가능하며, **'환승연애', '술꾼도시여자들'** 등 화제성 높은 독점 오리지널 콘텐츠가 인기입니다.'
+    },
+    '웨이브': {
+        '추천': '지상파/종편 드라마 및 예능 다시보기',
+        '설명': 'KBS, MBC, SBS 등 **지상파 3사**와 종편 채널의 **최신 드라마, 예능** 프로그램 VOD에 강점을 보입니다.'
+    },
+    '쿠팡플레이': {
+        '추천': '독점 스포츠 생중계 및 SNL 코리아',
+        '설명': 'K리그 등 **독점 스포츠 경기 생중계**와 젊은 층에게 인기 있는 **'SNL 코리아'** 등의 코미디 콘텐츠를 제공합니다.'
+    },
+    '디즈니플러스': {
+        '추천': '마블, 스타워즈, 픽사 오리지널 시리즈',
+        '설명': '**마블 시네마틱 유니버스(MCU)**, **스타워즈** 등 강력한 글로벌 프랜차이즈의 독점 오리지널 시리즈가 주요 콘텐츠입니다.'
+    }
+}
+
 def get_recommendation_and_explanation(ott_name):
     """OTT 서비스별 일반적인 인기 콘텐츠 유형과 설명을 반환합니다."""
-    recommendations = {
-        '유튜브': {
-            '추천': '인기 쇼츠, 브이로그 및 라이브 스트리밍',
-            '설명': '1인 크리에이터의 **짧고 재미있는 숏폼 콘텐츠(Shorts)**와 실시간 소통이 가능한 **라이브 방송**이 모든 연령대에서 압도적인 인기를 보입니다. 특히, ASMR, 게임, 뉴스, 경제 채널이 활발합니다.'
-        },
-        '넷플릭스': {
-            '추천': '오리지널 K-드라마, 글로벌 시리즈 및 영화',
-            '설명': '세계적인 성공을 거둔 **넷플릭스 오리지널 드라마** 시리즈와 전 세계에서 인기를 끄는 **블록버스터 영화 및 미드**가 주력 콘텐츠입니다. 한 번에 몰아보기에 최적화되어 있습니다.'
-        },
-        '티빙': {
-            '추천': 'CJ ENM 채널의 최신 예능/드라마 및 독점 오리지널',
-            '설명': 'tvN, Mnet 등 **CJ ENM 계열 채널**의 실시간 및 VOD 시청이 가능하며, **'환승연애', '술꾼도시여자들'** 등 화제성 높은 독점 **티빙 오리지널 콘텐츠**가 인기입니다.'
-        },
-        '웨이브': {
-            '추천': '지상파/종편 드라마 및 예능 다시보기',
-            '설명': 'KBS, MBC, SBS 등 **지상파 3사**와 종편 채널의 **최신 드라마, 예능, 시사/교양** 프로그램 VOD에 강점을 보입니다. 오래된 인기 프로그램도 쉽게 찾아볼 수 있습니다.'
-        },
-        '쿠팡플레이': {
-            '추천': '독점 스포츠 생중계 및 SNL 코리아',
-            '설명': 'K리그 등 **독점 스포츠 경기 생중계**와 젊은 층에게 인기 있는 **'SNL 코리아'** 등의 코미디 콘텐츠, 그리고 해외 드라마 및 영화를 빠르게 업데이트하는 것이 특징입니다.'
-        },
-        '디즈니플러스': {
-            '추천': '마블, 스타워즈, 픽사 오리지널 시리즈',
-            '설명': '**마블 시네마틱 유니버스(MCU)**, **스타워즈** 등 강력한 글로벌 프랜차이즈의 독점 오리지널 시리즈와 **디즈니/픽사 애니메이션** 전체 라이브러리가 주요 콘텐츠입니다.'
-        },
-        # 기타 OTT에 대한 일반적인 설명 (선호도 낮을 경우 대비)
-        '기타': {
-            '추천': '전문 분야 영상 또는 독립 콘텐츠',
-            '설명': '특정 주제에 특화된 영상이나 덜 알려진 독립 콘텐츠 플랫폼을 이용하는 경우입니다.'
-        }
-    }
-    return recommendations.get(ott_name, {'추천': '정보 없음', '설명': '이 OTT 서비스에 대한 일반적인 추천 정보가 준비되지 않았습니다.'})
+    return RECOMMENDATIONS.get(ott_name, {'추천': '정보 없음', '설명': '이 OTT 서비스에 대한 추천 정보가 준비되지 않았습니다.'})
 
 
-# --- 데이터 필터링 및 그래프 생성 함수 ---
+# --- CHART GENERATION ---
 
 def create_plotly_bar_chart(df, year, sub_division):
-    # 1. 필터링 및 순위 정렬
+    
     filtered_data = df[
         (df['연도'] == year) &
         (df['구분2'] == sub_division)
     ].sort_values(by='이용률(%)', ascending=False).reset_index(drop=True)
 
-    # 2. 순위 및 컬러 맵핑: 1등은 빨간색, 나머지는 파란색 그라데이션
-    
-    blue_shades = [
-        '#0047AB', # 2등 (진한 파랑)
-        '#1f77b4', 
-        '#4682B4', 
-        '#6a9cbf', 
-        '#8db5ca',
-        '#b1cde5',
-        '#d3e6f0', # 옅은 파랑
-    ]
-    
+    # 1등은 빨간색, 나머지는 파란색 그라데이션
+    blue_shades = ['#0047AB', '#1f77b4', '#4682B4', '#6a9cbf', '#8db5ca', '#b1cde5', '#d3e6f0']
     colors = []
     for i in range(len(filtered_data)):
         if i == 0:
@@ -118,7 +99,6 @@ def create_plotly_bar_chart(df, year, sub_division):
         else:
             colors.append(blue_shades[(i - 1) % len(blue_shades)])
 
-    # 3. Plotly 그래프 생성
     fig = go.Figure(data=[
         go.Bar(
             x=filtered_data['이용률(%)'],
@@ -130,16 +110,8 @@ def create_plotly_bar_chart(df, year, sub_division):
         )
     ])
 
-    # 4. 레이아웃 설정
     fig.update_layout(
-        title={
-            'text': f"**{sub_division}의 OTT 서비스 선호 순위**",
-            'y':0.95,
-            'x':0.5,
-            'xanchor': 'center',
-            'yanchor': 'top',
-            'font': {'size': 20}
-        },
+        title={'text': f"**{sub_division}의 OTT 서비스 선호 순위**", 'y':0.95, 'x':0.5, 'xanchor': 'center', 'yanchor': 'top', 'font': {'size': 20}},
         xaxis_title="이용률 (%)",
         yaxis_title="OTT 서비스",
         yaxis={'categoryorder':'total ascending'},
@@ -149,10 +121,10 @@ def create_plotly_bar_chart(df, year, sub_division):
     
     fig.update_traces(hovertemplate='<b>%{y}</b><br>이용률: %{x:.1f}%<extra></extra>')
 
-    return fig, filtered_data # 그래프와 함께 필터링된 데이터를 반환
+    return fig, filtered_data 
 
 
-# --- Streamlit 인터페이스 실행 ---
+# --- STREAMLIT INTERFACE ---
 
 st.title("📺 OTT 서비스 선호도 인터랙티브 분석")
 st.markdown("---")
@@ -188,32 +160,35 @@ if not df_long.empty:
     st.markdown("---")
     st.subheader("🥇 Top 3 OTT 서비스 인기 콘텐츠 추천 및 설명")
     
-    # 상위 3개 OTT 서비스 추출
     top_3_otts = ranked_data['OTT'].head(3).tolist()
     
-    # columns를 사용하여 3개 카드를 병렬로 표시
     cols = st.columns(3)
     
     for i, ott_name in enumerate(top_3_otts):
         recommendation = get_recommendation_and_explanation(ott_name)
         rank = i + 1
+        utilization_rate = ranked_data.iloc[i]["이용률(%)"]
+        
+        # HTML 스타일 문자열을 함수 호출 시에만 생성
+        if rank == 1:
+            color_style = "background-color: #ffeaea; border-left: 5px solid red; padding: 10px; border-radius: 5px;"
+        else:
+            color_style = "background-color: #eaf3ff; border-left: 5px solid #0047AB; padding: 10px; border-radius: 5px;"
+            
+        card_content = f"""
+        <div style="{color_style}">
+        <h4><b>{rank}위: {ott_name}</b> ({utilization_rate:.1f}%)</h4>
+        <p><b>📌 주요 인기 콘텐츠</b>: {recommendation["추천"]}</p>
+        <p><b>💬 설명</b>: {recommendation["설명"]}</p>
+        </div>
+        """
         
         with cols[i]:
-            # 1등은 빨간색 배경, 2, 3등은 파란색 계열 배경 사용
-            if rank == 1:
-                color_style = "background-color: #ffeaea; border-left: 5px solid red; padding: 10px; border-radius: 5px;"
-            else:
-                color_style = "background-color: #eaf3ff; border-left: 5px solid #0047AB; padding: 10px; border-radius: 5px;"
-                
-            st.markdown(f'<div style="{color_style}">', unsafe_allow_html=True)
-            st.markdown(f'#### **{rank}위: {ott_name}** ({ranked_data.iloc[i]["이용률(%)"]:.1f}%)')
-            st.markdown(f'**📌 주요 인기 콘텐츠**: {recommendation["추천"]}')
-            st.markdown(f'**💬 설명**: {recommendation["설명"]}')
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown(card_content, unsafe_allow_html=True)
 
 
 else:
-    st.warning("선택된 조건에 해당하는 데이터가 없습니다.")
+    st.warning("선택된 조건에 해당하는 데이터가 없습니다. 필터 조건을 확인해주세요.")
 
 # 하단에 원본 데이터 테이블 표시
 st.markdown("---")
