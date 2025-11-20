@@ -5,6 +5,20 @@ import plotly.express as px
 
 # CSV는 루트 폴더에 있으므로 ../video.csv 로 로드
 def load_data():
+    import os
+    # 여러 경로 테스트
+    candidate_paths = [
+        '../video.csv',      # pages 폴더 기준 루트
+        './video.csv',       # 같은 폴더
+        '/mount/src/ai-pirst/video.csv',  # 스트림릿 클라우드 실제 루트 경로 가능성
+        '/app/video.csv',    # 일부 클라우드 환경 루트
+    ]
+    for p in candidate_paths:
+        if os.path.exists(p):
+            return pd.read_csv(p)
+    # 찾지 못한 경우 에러 표시
+    raise FileNotFoundError(f"CSV 파일을 찾을 수 없습니다. 확인한 경로: {candidate_paths}")
+
     return pd.read_csv('../video.csv')
 
 def get_top_apps(df, year, viewer_col):
@@ -80,3 +94,6 @@ st.plotly_chart(fig, use_container_width=True)
 # 상위 앱 추천
 show_recommendations(df, top_apps_sorted, viewer_selected)
 
+
+
+\
