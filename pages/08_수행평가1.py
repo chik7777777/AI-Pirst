@@ -1,214 +1,162 @@
-# -*- coding: utf-8 -*-
+# pages/06_video_app.py
+# Streamlit page (single-file) that loads ../video.csv and shows interactive Plotly charts.
+# Requirements section removed.
+
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
+import plotly.express as px
+import numpy as np
+from pathlib import Path
 
-# --- CONFIGURATION & DATA LOAD ---
+st.set_page_config(page_title="Video App Preference Explorer", layout="wide")
 
-st.set_page_config(
-    page_title="OTT 서비스 선호도 분석 및 콘텐츠 추천",
-    layout="wide"
-)
+st.title("📊 어떤 어플을 선호했을까? — Video App Preference Explorer")
+st.write("CSV 파일: `../video.csv` 를 불러와 분석합니다. (pages 폴더 내부에서 실행하세요)")
 
-# 데이터 로드 및 캐싱 함수
 @st.cache_data
-def load_data(file_path):
-    """CSV 파일을 불러오고 인코딩 오류를 처리합니다."""
-    # 경로: Streamlit Root 폴더 기준 'video.csv'
-    try:
-        df = pd.read_csv(file_path, encoding='utf-8')
-        return df
-    except Exception:
-        # 광범위한 오류 처리. 인코딩 오류 외의 다른 문제도 포함될 수 있음.
-        st.warning("CSV 파일을 로드하는 중 오류가 발생했습니다. 인코딩을 'euc-kr'로 재시도합니다.")
-        return pd.read_csv(file_path, encoding='euc-kr')
-
-# 분석 제외 칼럼
-EXCLUDE_COLUMNS = ['연도', '구분1', '구분2', '사례수', 'OTT 비이용', '기타']
+def load_data(path: str = "../video.csv"):
+    for e in ["cp949", "euc-kr", "utf-8", "latin1"]:
+        try:
+            df = pd.read_csv(path, encoding=e)
+            return df, e
+        except Exception:
+            pass
+    raise RuntimeError(f"파일을 불러오지 못했습니다. 경로와 인코딩을 확인하세요: {path}")
 
 try:
-    df_raw = load_data('video.csv') 
-except FileNotFoundError:
-    st.error("🚨 `video.csv` 파일을 프로젝트 최상위 폴더(Root)에서 찾을 수 없습니다. 경로를 확인해주세요.")
-    st.stop() 
+    df, used_encoding = load_data()
+    st.sidebar.success(f"Loaded ../video.csv (encoding={used_encoding})")
+except Exception as e:
+    st.sidebar.error(str(e))
+    st.stop()
 
+st.sidebar.markdown("---")
+st.sidebar.header("컬럼 자동 감지 (수정 가능)")
 
-# --- PREPROCESSING ---
+cols = df.columns.tolist()
 
-def preprocess_data(df):
-    """Wide 포맷을 Long 포맷으로 변환"""
-    ott_columns = [col for col in df.columns if col not in EXCLUDE_COLUMNS]
-    df_long = pd.melt(
-        df,
-        id_vars=['연도', '구분1', '구분2'],
-        value_vars=ott_columns,
-        var_name='OTT',
-        value_name='이용률(%)'
-    )
-    return df_long
+def detect_column(candidates):
+    for c in candidates:
+        for col in cols:
+            if col.lower() == c:
+                return col
+    for c in candidates:
+        for col in cols:
+            if c in col.lower():
+                return col
+    return None
 
-df_long = preprocess_data(df_raw.copy())
+year_col = detect_column(["year", "upload_year", "date"])
+app_col = detect_column(["app", "platform"])
+views_col = detect_column(["views", "view_count", "watch"])
+likes_col = detect_column(["likes", "like_count"])
+comments_col = detect_column(["comments", "comment_count"])
+viewer_col = detect_column(["viewer", "audience", "age", "gender", "viewer_type"])
 
+st.sidebar.markdown("자동 감지 결과를 확인하고 수정하세요:")
+selected_year_col = st.sidebar.selectbox("연도 컬럼", options=[None] + cols, index=(cols.index(year_col) if year_col in cols else 0))
+selected_app_col = st.sidebar.selectbox("어플/플랫폼 컬럼", options=[None] + cols, index=(cols.index(app_col) if app_col in cols else 0))
+selected_views_col = st.sidebar.selectbox("조회수 컬럼", options=[None] + cols, index=(cols.index(views_col) if views_col in cols else 0))
+selected_likes_col = st.sidebar.selectbox("좋아요 컬럼", options=[None] + cols, index=(cols.index(likes_col) if likes_col in cols else 0))
+selected_viewer_col = st.sidebar.selectbox("시청자 기준 컬럼", options=[None] + cols, index=(cols.index(viewer_col) if viewer_col in cols else 0))
 
-# --- RECOMMENDATION DATA & FUNCTION ---
-RECOMMENDATIONS = {
-    '유튜브': {
-        '추천': '인기 쇼츠, 브이로그 및 라이브 스트리밍',
-        '설명': '1인 크리에이터의 **짧고 재미있는 숏폼 콘텐츠(Shorts)**와 실시간 소통이 가능한 **라이브 방송**이 모든 연령대에서 압도적인 인기를 보입니다.'
-    },
-    '넷플릭스': {
-        '추천': '오리지널 K-드라마, 글로벌 시리즈 및 영화',
-        '설명': '세계적인 성공을 거둔 **넷플릭스 오리지널 드라마** 시리즈와 전 세계에서 인기를 끄는 **블록버스터 영화**가 주력 콘텐츠입니다.'
-    },
-    '티빙': {
-        '추천': 'CJ ENM 채널의 최신 예능/드라마 및 독점 오리지널',
-        '설명': 'tvN, Mnet 등 **CJ ENM 계열 채널** VOD 시청이 가능하며, **\'환승연애\', \'술꾼도시여자들\'** 등 화제성 높은 독점 오리지널 콘텐츠가 인기입니다.'
-    },
-    '웨이브': {
-        '추천': '지상파/종편 드라마 및 예능 다시보기',
-        '설명': 'KBS, MBC, SBS 등 **지상파 3사**와 종편 채널의 **최신 드라마, 예능** 프로그램 VOD에 강점을 보입니다.'
-    },
-    '쿠팡플레이': {
-        '추천': '독점 스포츠 생중계 및 SNL 코리아',
-        '설명': 'K리그 등 **독점 스포츠 경기 생중계**와 젊은 층에게 인기 있는 **\'SNL 코리아\'** 등의 코미디 콘텐츠를 제공합니다.'
-    },
-    '디즈니플러스': {
-        '추천': '마블, 스타워즈, 픽사 오리지널 시리즈',
-        '설명': '**마블 시네마틱 유니버스(MCU)**, **스타워즈** 등 강력한 글로벌 프랜차이즈의 독점 오리지널 시리즈가 주요 콘텐츠입니다.'
-    }
-}
+if not selected_app_col:
+    st.error("어플/플랫폼 컬럼을 선택해주세요.")
+    st.stop()
 
-def get_recommendation_and_explanation(ott_name):
-    """OTT 서비스별 일반적인 인기 콘텐츠 유형과 설명을 반환합니다."""
-    return RECOMMENDATIONS.get(ott_name, {'추천': '정보 없음', '설명': '이 OTT 서비스에 대한 추천 정보가 준비되지 않았습니다.'})
-
-
-# --- CHART GENERATION ---
-
-def create_plotly_bar_chart(df, year, sub_division):
-    
-    filtered_data = df[
-        (df['연도'] == year) &
-        (df['구분2'] == sub_division)
-    ].sort_values(by='이용률(%)', ascending=False).reset_index(drop=True)
-
-    # 1등은 빨간색, 나머지는 파란색 그라데이션
-    blue_shades = ['#0047AB', '#1f77b4', '#4682B4', '#6a9cbf', '#8db5ca', '##b1cde5', '#d3e6f0']
-    colors = []
-    for i in range(len(filtered_data)):
-        if i == 0:
-            colors.append('red') # 1등
+use_year_filter = False
+if selected_year_col in df.columns:
+    try:
+        df['_parsed_date'] = pd.to_datetime(df[selected_year_col], errors='coerce')
+        if df['_parsed_date'].notnull().any():
+            df['_year'] = df['_parsed_date'].dt.year
         else:
-            colors.append(blue_shades[(i - 1) % len(blue_shades)])
+            if pd.api.types.is_numeric_dtype(df[selected_year_col]):
+                df['_year'] = df[selected_year_col]
+        use_year_filter = True
+    except:
+        use_year_filter = False
 
-    fig = go.Figure(data=[
-        go.Bar(
-            x=filtered_data['이용률(%)'],
-            y=filtered_data['OTT'],
-            marker_color=colors,
-            orientation='h',
-            text=filtered_data['이용률(%)'].apply(lambda x: f'{x:.1f}%'),
-            textposition='outside',
-        )
-    ])
+st.sidebar.markdown("---")
+st.sidebar.header("필터")
 
-    fig.update_layout(
-        title={'text': f"**{sub_division}의 OTT 서비스 선호 순위**", 'y':0.95, 'x':0.5, 'xanchor': 'center', 'yanchor': 'top', 'font': {'size': 20}},
-        xaxis_title="이용률 (%)",
-        yaxis_title="OTT 서비스",
-        yaxis={'categoryorder':'total ascending'},
-        height=600,
-        margin=dict(l=10, r=10, t=50, b=10)
-    )
-    
-    fig.update_traces(hovertemplate='<b>%{y}</b><br>이용률: %{x:.1f}%<extra></extra>')
-
-    return fig, filtered_data 
-
-
-# --- STREAMLIT INTERFACE ---
-
-st.title("📺 OTT 서비스 선호도 인터랙티브 분석")
-st.markdown("---")
-
-# 1. 사이드바 구성 (사용자 입력)
-with st.sidebar:
-    st.header("⚙️ 분석 조건 선택")
-
-    years = sorted(df_raw['연도'].unique())
-    selected_year = st.selectbox("🗓️ 년도를 선택하세요:", years, index=len(years)-1)
-
-    divisions = df_raw['구분1'].unique()
-    selected_division_type = st.radio("👥 시청자 구분 기준:", divisions)
-
-    filtered_df_by_type = df_raw[df_raw['구분1'] == selected_division_type]
-    sub_divisions = sorted(filtered_df_by_type['구분2'].unique())
-    selected_sub_division = st.selectbox(
-        f"세부 {selected_division_type} 기준 선택:",
-        sub_divisions
-    )
-
-st.header(f"📊 {selected_year}년, {selected_sub_division}의 OTT 이용률 순위")
-st.write(f"**기준**: **{selected_year}년** / **{selected_sub_division}** (단위: %) - **OTT 비이용, 기타 제외**")
-st.markdown("---")
-
-
-# 그래프 생성 및 데이터 추출
-if not df_long.empty:
-    chart, ranked_data = create_plotly_bar_chart(df_long, selected_year, selected_sub_division)
-    st.plotly_chart(chart, use_container_width=True)
-    
-    # --- Top 3 콘텐츠 추천 섹션 ---
-    st.markdown("---")
-    st.subheader("🥇 Top 3 OTT 서비스 인기 콘텐츠 추천 및 설명")
-    
-    top_3_otts = ranked_data['OTT'].head(3).tolist()
-    
-    cols = st.columns(3)
-    
-    # HTML 템플릿 정의 (트리플 쿼트 사용)
-    CARD_TEMPLATE = """
-    <div style="{color_style}">
-    <h4><b>{rank}위: {ott_name}</b> ({utilization_rate:.1f}%)</h4>
-    <p><b>📌 주요 인기 콘텐츠</b>: {recommendation_추천}</p>
-    <p><b>💬 설명</b>: {recommendation_설명}</p>
-    </div>
-    """
-    
-    for i, ott_name in enumerate(top_3_otts):
-        recommendation = get_recommendation_and_explanation(ott_name)
-        rank = i + 1
-        utilization_rate = ranked_data.iloc[i]["이용률(%)"]
-        
-        # 스타일 정의
-        if rank == 1:
-            color_style = "background-color: #ffeaea; border-left: 5px solid red; padding: 10px; border-radius: 5px;"
-        else:
-            color_style = "background-color: #eaf3ff; border-left: 5px solid #0047AB; padding: 10px; border-radius: 5px;"
-            
-        
-        # .format()을 사용하여 카드 내용 채우기
-        card_content = CARD_TEMPLATE.format(
-            color_style=color_style,
-            rank=rank,
-            ott_name=ott_name,
-            utilization_rate=utilization_rate,
-            recommendation_추천=recommendation["추천"],
-            recommendation_설명=recommendation["설명"]
-        ).strip()
-        
-        with cols[i]:
-            st.markdown(card_content, unsafe_allow_html=True)
-
-
+if use_year_filter:
+    years = sorted(df['_year'].dropna().unique().tolist())
+    selected_year = st.sidebar.selectbox("연도", options=["전체"] + [str(int(y)) for y in years])
 else:
-    st.warning("선택된 조건에 해당하는 데이터가 없습니다. 필터 조건을 확인해주세요.")
+    selected_year = "전체"
 
-# 하단에 원본 데이터 테이블 표시
-st.markdown("---")
-with st.expander("원본 데이터 테이블 보기"):
-    st.dataframe(df_raw[
-        (df_raw['연도'] == selected_year) & 
-        (df_raw['구분2'] == selected_sub_division)
-    ].reset_index(drop=True), use_container_width=True)
-  
+viewer_values = None
+if selected_viewer_col in df.columns:
+    viewer_values = sorted(df[selected_viewer_col].dropna().unique().tolist())
+    selected_viewer = st.sidebar.selectbox("시청자 기준 값", options=["전체"] + [str(v) for v in viewer_values])
+else:
+    selected_viewer = "전체"
+
+filtered = df.copy()
+if use_year_filter and selected_year != "전체":
+    filtered = filtered[filtered['_year'] == int(selected_year)]
+if selected_viewer_col and selected_viewer != "전체":
+    filtered = filtered[filtered[selected_viewer_col] == selected_viewer]
+
+st.write(f"**필터된 데이터 수:** {len(filtered)}")
+
+weight_col = selected_views_col if selected_views_col in filtered.columns else None
+if weight_col:
+    agg = filtered.groupby(selected_app_col)[weight_col].sum().reset_index(name='weight')
+else:
+    agg = filtered[selected_app_col].value_counts().reset_index()
+    agg.columns = [selected_app_col, 'weight']
+
+agg = agg.sort_values('weight', ascending=False)
+apps = agg[selected_app_col].astype(str).tolist()
+colors = []
+if apps:
+    colors.append('rgba(255,0,0,1)')
+    n_other = max(1, len(apps)-1)
+    base = np.array([31,119,180])
+    for i in range(n_other):
+        t = i / max(1, n_other-1)
+        rgb = (base * (1 - 0.6*t) + 255 * (0.6*t)).astype(int)
+        alpha = 1 - (0.3 * t)
+        colors.append(f'rgba({rgb[0]},{rgb[1]},{rgb[2]},{alpha:.2f})')
+colors = colors[:len(apps)]
+
+if len(agg) == 0:
+    st.warning("표시할 데이터가 없습니다.")
+else:
+    fig = px.bar(agg, x=selected_app_col, y='weight', title="앱 선호도", text='weight')
+    fig.update_traces(marker_color=colors)
+    fig.update_layout(xaxis_title='앱', yaxis_title='값')
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("---")
+    st.header("🏆 상위 3개 앱 인기 영상 추천")
+
+    top_n = agg.head(3)
+    for rank, row in enumerate(top_n.itertuples(index=False), start=1):
+        app_name = getattr(row, selected_app_col)
+        st.subheader(f"{rank}위 — {app_name}")
+        app_videos = filtered[filtered[selected_app_col] == app_name]
+
+        sort_by = selected_views_col if selected_views_col in app_videos.columns else None
+        if sort_by:
+            app_videos = app_videos.sort_values(sort_by, ascending=False)
+        top_videos = app_videos.head(3)
+
+        title_col = None
+        for c in ['title','video_title','name','title_text']:
+            if c in app_videos.columns:
+                title_col = c
+                break
+
+        for vid_idx, vid in top_videos.iterrows():
+            title = vid[title_col] if title_col else f"Row {vid_idx}"
+            reason = []
+            if sort_by:
+                reason.append(f"{sort_by} 높음")
+            st.write(f"- **{title}** — {' / '.join(reason) if reason else '정보 부족'}")
+
+st.sidebar.markdown("---")
+st.sidebar.header("실행 방법")
+st.sidebar.code("streamlit run pages/06_video_app.py")
